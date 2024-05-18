@@ -1,32 +1,33 @@
-import requests
-from minio import Minio
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 import io
+from minio import Minio
 from bs4 import BeautifulSoup
+import os
+import random
 
+minio_client = Minio(
+        '127.0.0.1:9000',
+        access_key='LMaoN5mHeQ7E30sYRgZ9',
+        secret_key='3lHDwGUx64Gg5paYADKX3Itf3Z2GTvXYJgMl7p3P',
+        secure=False
+    )
 
-# def web_scraping_task():
-#     url = 'https://www.realtor.com/realestateandhomes-detail/2542-Carya-Pond-Ln_Charlotte_NC_28212_M52613-85497?from=srp-list-card'
-#     headers = {
-#         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-#         'Accept-Language': 'en-US,en;q=0.9',
-#         'Accept-Encoding': 'gzip, deflate, br',
-#         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-#         'Connection': 'keep-alive',
-#         'Upgrade-Insecure-Requests': '1',
-#         'Referer': 'https://www.google.com/'
-#     }
-#     response = requests.get(url, headers=headers)
-    
-#     if response.status_code == 200:
-#         html_content = response.text
-#         save_to_minio('scraped-content-house.html', html_content)
-#     else:
-#         print(f"Failed to retrieve the website. Status code: {response.status_code}")
+bucket_name = 'real-estate'
 
-def parse_HTML_To_List_Of_Links():
-    url = 'https://www.realtor.com/realestateandhomes-search/Charlotte_NC'
+def generate_random_user_agent():
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.128 Safari/537.36',
+        # Add more user-agent strings as needed
+    ]
+    return random.choice(user_agents)
+
+def web_scraping_task():
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
@@ -34,27 +35,70 @@ def parse_HTML_To_List_Of_Links():
         'Upgrade-Insecure-Requests': '1',
         'Referer': 'https://www.google.com/'
     }
-    response = requests.get(url, headers=headers)
     
-    if response.status_code == 200:
-        html_content = response.text
-        
-        
-    soup = BeautifulSoup(html_content, 'lxml')
-    tags = soup.find_all('a')
-    print(tags)
+    url = 'https://www.realtor.com/realestateandhomes-search/Charlotte_NC'
     
+    # Set up Selenium with Chrome WebDriver
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Run in headless mode
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument(f"--user-agent={generate_random_user_agent()}")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
     
+    driver = webdriver.Chrome(options=chrome_options)
 
-def save_to_minio(filename, data):
-    minio_client = Minio(
-        '127.0.0.1:9000',
-        access_key='LMaoN5mHeQ7E30sYRgZ9',
-        secret_key='3lHDwGUx64Gg5paYADKX3Itf3Z2GTvXYJgMl7p3P',
-        secure=False
-    )
+    try:
+        driver.get(url)
+        
+        # Wait for the page to load completely (adjust as needed)
+        driver.implicitly_wait(10)
+        
+        # Print website response (for debugging)
+        print("Website Response:")
+        print(driver.page_source)
+        
+        # Get the fully rendered HTML
+        html_content = driver.page_source
+        
+        save_to_minio('search-result-pages/Charlotte_NC/scraped-content-house.html', html_content)
+    
+    finally:
+        driver.quit()
 
-    bucket_name = 'real-estate'
+
+def parse_HTML_To_List_Of_Links():
+    
+    filepath = 'search-result-pages/Charlotte_NC/scraped-content-house.html'
+    soup = get_from_minio(filepath)
+    
+    tags = soup.find_all('a', href = True)
+    allHrefs = []
+    for t in tags:
+        allHrefs.append(t['href'])
+       
+    filtered_hrefs = [href for href in allHrefs if '/realestateandhomes-detail/' in href]
+        
+    
+    print(filtered_hrefs)
+    print("Number of links: " + str(len(filtered_hrefs)))
+    
+def get_from_minio(fullfilepath):
+
+    response = minio_client.get_object(bucket_name, fullfilepath)
+
+    html_data = response.data.decode('utf-8')
+
+    response.close()
+    response.release_conn()
+        
+    soup = BeautifulSoup(html_data, 'html.parser')
+        
+    return soup
+    
+def save_to_minio(fullfilepath, data):
+
     if not minio_client.bucket_exists(bucket_name):
         minio_client.make_bucket(bucket_name)
 
@@ -62,9 +106,12 @@ def save_to_minio(filename, data):
     data_bytes = data.encode('utf-8')
 
     minio_client.put_object(
-        bucket_name, filename, io.BytesIO(data_bytes), len(data_bytes)
+        bucket_name, fullfilepath, io.BytesIO(data_bytes), len(data_bytes)
     )
 
 if __name__ == '__main__':
+    web_scraping_task()
+    #path = 'search-result-pages/Charlotte_NC/scraped-content-house.html'
+    #print(get_from_minio(path))
     parse_HTML_To_List_Of_Links()
 
