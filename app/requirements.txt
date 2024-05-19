@@ -4,3 +4,6 @@ minio
 lxml
 selenium
 webdriver-manager
+undetected-chromedriver
+setuptools
+time

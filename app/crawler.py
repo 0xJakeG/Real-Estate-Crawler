@@ -7,6 +7,7 @@ from minio import Minio
 from bs4 import BeautifulSoup
 import os
 import random
+import undetected_chromedriver as uc
 
 minio_client = Minio(
         '127.0.0.1:9000',
@@ -38,16 +39,7 @@ def web_scraping_task():
     
     url = 'https://www.realtor.com/realestateandhomes-search/Charlotte_NC'
     
-    # Set up Selenium with Chrome WebDriver
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Run in headless mode
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument(f"--user-agent={generate_random_user_agent()}")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    driver = webdriver.Chrome(options=chrome_options)
+    driver = uc.Chrome(headless=True,use_subprocess=False)
 
     try:
         driver.get(url)
